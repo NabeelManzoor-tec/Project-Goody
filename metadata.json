@@ -1,0 +1,6 @@
+{
+  "name": "Logistics Hub",
+  "description": "Logistics portal for admin, vehicle owners, and consignees with automated matching, bidding, and tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
