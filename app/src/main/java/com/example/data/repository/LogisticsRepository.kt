@@ -52,8 +52,11 @@ class LogisticsRepository(private val logisticsDao: LogisticsDao) {
         // Update accepted bid status to ACCEPTED
         logisticsDao.updateBidStatus(bidId, "ACCEPTED")
 
-        // Retrieve vehicle details
+        // Retrieve vehicle details and mark as unavailable
         val vehicle = logisticsDao.getVehicleById(acceptedBid.vehicleId)
+        if (vehicle != null) {
+            logisticsDao.updateVehicle(vehicle.copy(isAvailable = false))
+        }
 
         // Find the shipment and update its status
         val shipment = logisticsDao.getShipmentByIdSync(shipmentId)

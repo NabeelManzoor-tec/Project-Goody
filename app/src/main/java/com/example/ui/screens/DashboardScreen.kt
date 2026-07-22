@@ -30,8 +30,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import androidx.compose.runtime.collectAsState
 import com.example.data.model.BidEntity
 import com.example.data.model.ShipmentEntity
+import kotlinx.coroutines.flow.Flow
 import com.example.data.model.VehicleEntity
 import com.example.ui.viewmodel.LogisticsViewModel
 import com.example.ui.viewmodel.UserRole
@@ -45,6 +47,7 @@ fun DashboardScreen(
     modifier: Modifier = Modifier
 ) {
     val role by viewModel.currentRole.collectAsState()
+    val currentUser by viewModel.currentUser.collectAsState()
     val shipments by viewModel.shipments.collectAsState()
     val bids by viewModel.bids.collectAsState()
     val vehicles by viewModel.vehicles.collectAsState()
@@ -92,16 +95,21 @@ fun DashboardScreen(
                         .padding(16.dp)
                 ) {
                     Text(
-                        text = "Zone Logistics Hub",
+                        text = when (role) {
+                            UserRole.CONSIGNEE -> "Shipper Freight Portal"
+                            UserRole.VEHICLE_OWNER -> "Driver & Carrier Portal"
+                            UserRole.ADMIN -> "Admin Command Center"
+                        },
                         style = MaterialTheme.typography.titleLarge.copy(
                             color = Color.White,
                             fontWeight = FontWeight.Bold
                         )
                     )
                     Text(
-                        text = "Real-time automated freight matching and transparent bidding.",
+                        text = "Active Account: ${currentUser?.name ?: "Guest"} (${currentUser?.companyOrVehicle ?: "Logistics"})",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = Color.White.copy(alpha = 0.8f)
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontWeight = FontWeight.SemiBold
                         )
                     )
                 }
@@ -114,7 +122,7 @@ fun DashboardScreen(
                 item { ConsigneeStatsSection(shipments, bids) }
                 item { CreateShipmentCard(viewModel) }
                 item { ConsigneeShipmentsHeader() }
-                val myShipments = shipments.filter { it.senderName == "Consignee Portal" || it.senderName == "Fresh Farms Organic" || it.senderName == "Apex Hardware Corp" || it.senderName == "EcoTech Industries" }
+                val myShipments = shipments.filter { it.senderName == "Consignee Portal" || it.senderName == "Fresh Farms Organic" || it.senderName == "Apex Hardware Corp" || it.senderName == "EcoTech Industries" || it.senderName == currentUser?.name }
                 if (myShipments.isEmpty()) {
                     item { EmptyStateIndicator("No bookings found. Book your first freight load above.") }
                 } else {
@@ -149,6 +157,7 @@ fun DashboardScreen(
             }
             UserRole.ADMIN -> {
                 item { AdminStatsSection(shipments, vehicles, bids) }
+                item { AdminDebugSyncCard(viewModel) }
                 item { SystemParametersConfigCard() }
                 item { GlobalShipmentsHeader() }
                 if (shipments.isEmpty()) {
@@ -157,6 +166,83 @@ fun DashboardScreen(
                     items(shipments) { shipment ->
                         AdminShipmentItem(shipment, viewModel)
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminDebugSyncCard(viewModel: LogisticsViewModel) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.Sync,
+                        contentDescription = "Sync Debug",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Synchronize & Debug Controls",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Text(
+                text = "Resync local database state across Shipper, Driver, and Admin portals, trigger matching engine, or simulate GPS.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = { viewModel.synchronizeDebugData() },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(42.dp)
+                        .testTag("admin_sync_data_btn"),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Filled.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Sync Seed Data", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val pendingList = viewModel.shipments.value.filter { it.status == "PENDING_BIDS" }
+                        pendingList.forEach { viewModel.runAutomatedMatching(it.id) }
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(42.dp)
+                        .testTag("admin_auto_match_all_btn"),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Auto-Match Loads", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -415,6 +501,8 @@ fun ConsigneeShipmentsHeader() {
 
 @Composable
 fun ShipmentDashboardItem(shipment: ShipmentEntity, viewModel: LogisticsViewModel) {
+    val shipmentBids by viewModel.getBidsForShipment(shipment.id).collectAsState(initial = emptyList())
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -504,11 +592,89 @@ fun ShipmentDashboardItem(shipment: ShipmentEntity, viewModel: LogisticsViewMode
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Bidding active...",
+                            text = if (shipmentBids.isEmpty()) "Bidding active..." else "${shipmentBids.size} offer(s) pending",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.secondary
                         )
+                    }
+                }
+            }
+
+            // Direct Accept Bidding for Consignee viewable list
+            if (shipment.status == "PENDING_BIDS" && shipmentBids.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Active Carrier Offers",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    shipmentBids.forEach { bid ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .clickable(onClick = {}) // Consumes click to prevent navigating to Active Shipments screen
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = bid.driverName,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "${bid.vehicleType} • Plate: ${bid.plateNumber}",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = formatCurrency(bid.bidAmount),
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+
+                                Button(
+                                    onClick = { viewModel.acceptBid(shipment.id, bid.id) },
+                                    modifier = Modifier
+                                        .height(28.dp)
+                                        .testTag("accept_bid_dashboard_${bid.id}"),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    shape = RoundedCornerShape(6.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                ) {
+                                    Text("Accept", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
             }

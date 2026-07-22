@@ -13,6 +13,15 @@ import com.example.data.repository.LogisticsRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+data class UserAccount(
+    val id: Int = 1,
+    val name: String,
+    val email: String,
+    val role: UserRole,
+    val phone: String = "+1 (555) 019-2834",
+    val companyOrVehicle: String = "Global Freight Logistics"
+)
+
 enum class UserRole {
     ADMIN,
     VEHICLE_OWNER,
@@ -31,7 +40,41 @@ class LogisticsViewModel(
     private val repository: LogisticsRepository
 ) : AndroidViewModel(application) {
 
+    // Pre-configured Demo Accounts
+    val demoAccounts = mapOf(
+        UserRole.CONSIGNEE to UserAccount(
+            id = 1,
+            name = "EcoTech Shipper Corp",
+            email = "shipper@logistics.com",
+            role = UserRole.CONSIGNEE,
+            phone = "+1 (555) 892-1001",
+            companyOrVehicle = "EcoTech Global Imports"
+        ),
+        UserRole.VEHICLE_OWNER to UserAccount(
+            id = 2,
+            name = "Dave Miller (Fleet Driver)",
+            email = "driver@logistics.com",
+            role = UserRole.VEHICLE_OWNER,
+            phone = "+1 (555) 762-1082",
+            companyOrVehicle = "Semi Truck (TX-482-9B)"
+        ),
+        UserRole.ADMIN to UserAccount(
+            id = 3,
+            name = "System Administrator",
+            email = "admin@logistics.com",
+            role = UserRole.ADMIN,
+            phone = "+1 (555) 000-0000",
+            companyOrVehicle = "Zone Command Center HQ"
+        )
+    )
+
+    // FirebaseAuth Service Integration
+    private val firebaseAuthService = com.example.data.auth.FirebaseAuthService()
+
     // Current State
+    private val _currentUser = MutableStateFlow<UserAccount?>(null)
+    val currentUser: StateFlow<UserAccount?> = _currentUser.asStateFlow()
+
     private val _currentRole = MutableStateFlow(UserRole.CONSIGNEE)
     val currentRole: StateFlow<UserRole> = _currentRole.asStateFlow()
 
@@ -40,6 +83,9 @@ class LogisticsViewModel(
 
     private val _selectedShipmentId = MutableStateFlow<Int?>(null)
     val selectedShipmentId: StateFlow<Int?> = _selectedShipmentId.asStateFlow()
+
+    private val _syncMessage = MutableStateFlow<String?>(null)
+    val syncMessage: StateFlow<String?> = _syncMessage.asStateFlow()
 
     // Database Flows
     val shipments: StateFlow<List<ShipmentEntity>> = repository.allShipments
@@ -62,12 +108,89 @@ class LogisticsViewModel(
             repository.allVehicles.first().firstOrNull()?.let {
                 _selectedVehicleId.value = it.id
             }
+
+            // Check if user is already signed in via Firebase
+            firebaseAuthService.getCurrentFirebaseUser()?.let { existingUser ->
+                _currentUser.value = existingUser
+                _currentRole.value = existingUser.role
+            }
         }
+    }
+
+    // --- Authentication & Portal Switching ---
+
+    fun quickDemoLogin(role: UserRole) {
+        val account = demoAccounts[role]
+        _currentUser.value = account
+        _currentRole.value = role
+        if (role == UserRole.VEHICLE_OWNER && _selectedVehicleId.value == null) {
+            viewModelScope.launch {
+                vehicles.value.firstOrNull()?.let {
+                    _selectedVehicleId.value = it.id
+                }
+            }
+        }
+    }
+
+    fun signIn(email: String, password: String = "Password123!", role: UserRole) {
+        viewModelScope.launch {
+            _syncMessage.value = "Authenticating with Firebase Auth..."
+            val user = firebaseAuthService.signIn(email, password, role)
+            _currentUser.value = user
+            _currentRole.value = role
+            _syncMessage.value = "Successfully signed in to ${when(role) {
+                UserRole.CONSIGNEE -> "Shipper Portal"
+                UserRole.VEHICLE_OWNER -> "Driver Portal"
+                UserRole.ADMIN -> "Admin Control Center"
+            }}"
+            if (role == UserRole.VEHICLE_OWNER && _selectedVehicleId.value == null) {
+                vehicles.value.firstOrNull()?.let {
+                    _selectedVehicleId.value = it.id
+                }
+            }
+            kotlinx.coroutines.delay(2000)
+            _syncMessage.value = null
+        }
+    }
+
+    fun signUp(name: String, email: String, password: String = "Password123!", role: UserRole, phone: String, companyOrVehicle: String) {
+        viewModelScope.launch {
+            _syncMessage.value = "Creating Firebase account and registering role..."
+            val user = firebaseAuthService.signUp(name, email, password, role, phone, companyOrVehicle)
+            _currentUser.value = user
+            _currentRole.value = role
+
+            // If registered as driver, register vehicle as well
+            if (role == UserRole.VEHICLE_OWNER) {
+                registerVehicle(
+                    driver = name,
+                    plate = "REG-" + (100..999).random(),
+                    type = if (companyOrVehicle.isNotBlank()) companyOrVehicle else "Semi Truck",
+                    capacity = 15000.0,
+                    zone = "Country-wide"
+                )
+            }
+
+            _syncMessage.value = "Account created! Welcome to ${when(role) {
+                UserRole.CONSIGNEE -> "Shipper Portal"
+                UserRole.VEHICLE_OWNER -> "Driver Portal"
+                UserRole.ADMIN -> "Admin Command Center"
+            }}"
+            kotlinx.coroutines.delay(2000)
+            _syncMessage.value = null
+        }
+    }
+
+    fun signOut() {
+        firebaseAuthService.signOut()
+        _currentUser.value = null
+        _syncMessage.value = "Signed out of session"
     }
 
     // Role switcher
     fun setRole(role: UserRole) {
         _currentRole.value = role
+        _currentUser.value = demoAccounts[role] ?: _currentUser.value?.copy(role = role)
         // Auto-select vehicle when switching to Vehicle Owner
         if (role == UserRole.VEHICLE_OWNER && _selectedVehicleId.value == null) {
             viewModelScope.launch {
@@ -76,6 +199,22 @@ class LogisticsViewModel(
                 }
             }
         }
+    }
+
+    // --- Synchronization & Debug Utilities ---
+
+    fun synchronizeDebugData() {
+        viewModelScope.launch {
+            _syncMessage.value = "Synchronizing local database state..."
+            resetDatabase()
+            _syncMessage.value = "Debug state successfully synchronized with seed records!"
+            kotlinx.coroutines.delay(3000)
+            _syncMessage.value = null
+        }
+    }
+
+    fun clearSyncMessage() {
+        _syncMessage.value = null
     }
 
     fun setScreen(screen: Screen) {
@@ -216,15 +355,6 @@ class LogisticsViewModel(
     fun acceptBid(shipmentId: Int, bidId: Int) {
         viewModelScope.launch {
             repository.acceptBid(shipmentId, bidId)
-
-            // Mark vehicle as unavailable
-            val bid = bids.value.find { it.id == bidId }
-            if (bid != null) {
-                val vehicle = vehicles.value.find { it.id == bid.vehicleId }
-                if (vehicle != null) {
-                    repository.updateVehicle(vehicle.copy(isAvailable = false))
-                }
-            }
         }
     }
 
