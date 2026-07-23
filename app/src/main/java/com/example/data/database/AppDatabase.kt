@@ -6,12 +6,14 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.data.dao.LogisticsDao
 import com.example.data.model.BidEntity
+import com.example.data.model.ChatMessageEntity
 import com.example.data.model.ShipmentEntity
+import com.example.data.model.SupportTicketEntity
 import com.example.data.model.VehicleEntity
 
 @Database(
-    entities = [ShipmentEntity::class, BidEntity::class, VehicleEntity::class],
-    version = 1,
+    entities = [ShipmentEntity::class, BidEntity::class, VehicleEntity::class, SupportTicketEntity::class, ChatMessageEntity::class],
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

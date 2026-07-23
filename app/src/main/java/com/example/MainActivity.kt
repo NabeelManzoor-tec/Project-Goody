@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.database.AppDatabase
 import com.example.data.repository.LogisticsRepository
+import com.example.ui.components.CommunicationCenterDialog
+import com.example.ui.components.MilestoneNotificationsDialog
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.*
@@ -49,12 +51,50 @@ class MainActivity : ComponentActivity() {
                 val currentUser by viewModel.currentUser.collectAsState()
                 val syncMessage by viewModel.syncMessage.collectAsState()
 
+                val milestoneAlerts by viewModel.milestoneAlerts.collectAsState()
+                val unreadMilestoneCount by viewModel.unreadMilestoneCount.collectAsState()
+                val unreadChatCount by viewModel.unreadChatCount.collectAsState()
+
+                var showNotificationsDialog by remember { mutableStateOf(false) }
+                var showCommunicationHub by remember { mutableStateOf(false) }
+
+                // Request POST_NOTIFICATIONS permission on Android 13+
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    val notifLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+                    ) { }
+                    LaunchedEffect(Unit) {
+                        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                                context,
+                                android.Manifest.permission.POST_NOTIFICATIONS
+                            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                        ) {
+                            notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+                }
+
                 val snackbarHostState = remember { SnackbarHostState() }
 
                 LaunchedEffect(syncMessage) {
                     syncMessage?.let {
                         snackbarHostState.showSnackbar(it)
                     }
+                }
+
+                if (showNotificationsDialog) {
+                    MilestoneNotificationsDialog(
+                        viewModel = viewModel,
+                        alerts = milestoneAlerts,
+                        onDismiss = { showNotificationsDialog = false }
+                    )
+                }
+
+                if (showCommunicationHub) {
+                    CommunicationCenterDialog(
+                        viewModel = viewModel,
+                        onDismiss = { showCommunicationHub = false }
+                    )
                 }
 
                 if (currentUser == null) {
@@ -87,6 +127,68 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 actions = {
+                                    // Driver & Consignee Communication Hub Action Button
+                                    IconButton(
+                                        onClick = { showCommunicationHub = true },
+                                        modifier = Modifier.testTag("appbar_chat_hub")
+                                    ) {
+                                        BadgedBox(
+                                            badge = {
+                                                if (unreadChatCount > 0) {
+                                                    Badge(
+                                                        containerColor = MaterialTheme.colorScheme.primary,
+                                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                                    ) {
+                                                        Text("$unreadChatCount")
+                                                    }
+                                                }
+                                            }
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Forum,
+                                                contentDescription = "Driver-Shipper Communication Hub",
+                                                tint = if (unreadChatCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
+                                    // Shipper Milestone Notifications Action Button
+                                    IconButton(
+                                        onClick = { showNotificationsDialog = true },
+                                        modifier = Modifier.testTag("appbar_notifications")
+                                    ) {
+                                        BadgedBox(
+                                            badge = {
+                                                if (unreadMilestoneCount > 0) {
+                                                    Badge(
+                                                        containerColor = MaterialTheme.colorScheme.error,
+                                                        contentColor = MaterialTheme.colorScheme.onError
+                                                    ) {
+                                                        Text("$unreadMilestoneCount")
+                                                    }
+                                                }
+                                            }
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Notifications,
+                                                contentDescription = "Milestone Notifications",
+                                                tint = if (unreadMilestoneCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
+                                    // Connect Support Quick Action Button
+                                    IconButton(
+                                        onClick = { viewModel.setScreen(Screen.SUPPORT) },
+                                        modifier = Modifier.testTag("appbar_support")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.HeadsetMic,
+                                            contentDescription = "Connect Support",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+
                                     // Synchronize Debug Data Button
                                     IconButton(
                                         onClick = { viewModel.synchronizeDebugData() },
@@ -95,7 +197,7 @@ class MainActivity : ComponentActivity() {
                                         Icon(
                                             imageVector = Icons.Filled.Sync,
                                             contentDescription = "Sync Debug",
-                                            tint = MaterialTheme.colorScheme.primary
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
 
@@ -222,6 +324,19 @@ class MainActivity : ComponentActivity() {
                                 )
 
                                 NavigationBarItem(
+                                    selected = currentScreen == Screen.SUPPORT,
+                                    onClick = { viewModel.setScreen(Screen.SUPPORT) },
+                                    icon = {
+                                        Icon(
+                                            imageVector = if (currentScreen == Screen.SUPPORT) Icons.Filled.HeadsetMic else Icons.Outlined.HeadsetMic,
+                                            contentDescription = "Support & Help"
+                                        )
+                                    },
+                                    label = { Text("Support", fontSize = 10.sp) },
+                                    modifier = Modifier.testTag("nav_support")
+                                )
+
+                                NavigationBarItem(
                                     selected = currentScreen == Screen.BILLING,
                                     onClick = { viewModel.setScreen(Screen.BILLING) },
                                     icon = {
@@ -260,6 +375,10 @@ class MainActivity : ComponentActivity() {
                                     modifier = Modifier.fillMaxSize()
                                 )
                                 Screen.ACTIVE_SHIPMENTS -> ActiveShipmentsScreen(
+                                    viewModel = viewModel,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                Screen.SUPPORT -> SupportScreen(
                                     viewModel = viewModel,
                                     modifier = Modifier.fillMaxSize()
                                 )

@@ -2,7 +2,9 @@ package com.example.data.dao
 
 import androidx.room.*
 import com.example.data.model.BidEntity
+import com.example.data.model.ChatMessageEntity
 import com.example.data.model.ShipmentEntity
+import com.example.data.model.SupportTicketEntity
 import com.example.data.model.VehicleEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -65,4 +67,36 @@ interface LogisticsDao {
 
     @Delete
     suspend fun deleteVehicle(vehicle: VehicleEntity)
+
+    // --- Support Tickets ---
+    @Query("SELECT * FROM support_tickets ORDER BY timestamp DESC")
+    fun getAllSupportTickets(): Flow<List<SupportTicketEntity>>
+
+    @Query("SELECT * FROM support_tickets WHERE userEmail = :email ORDER BY timestamp DESC")
+    fun getSupportTicketsByUserEmail(email: String): Flow<List<SupportTicketEntity>>
+
+    @Query("SELECT * FROM support_tickets WHERE shipmentId = :shipmentId ORDER BY timestamp DESC")
+    fun getSupportTicketsForShipment(shipmentId: Int): Flow<List<SupportTicketEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSupportTicket(ticket: SupportTicketEntity): Long
+
+    @Update
+    suspend fun updateSupportTicket(ticket: SupportTicketEntity)
+
+    @Query("UPDATE support_tickets SET status = :status, supportResponse = :response WHERE id = :ticketId")
+    suspend fun respondToSupportTicket(ticketId: Int, status: String, response: String)
+
+    // --- Chat & Driver-Consignee Messages ---
+    @Query("SELECT * FROM chat_messages WHERE shipmentId = :shipmentId ORDER BY timestamp ASC")
+    fun getMessagesForShipment(shipmentId: Int): Flow<List<ChatMessageEntity>>
+
+    @Query("SELECT * FROM chat_messages ORDER BY timestamp DESC")
+    fun getAllChatMessages(): Flow<List<ChatMessageEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertChatMessage(message: ChatMessageEntity): Long
+
+    @Query("UPDATE chat_messages SET isRead = 1 WHERE shipmentId = :shipmentId AND senderName != :currentUserName")
+    suspend fun markChatMessagesRead(shipmentId: Int, currentUserName: String)
 }

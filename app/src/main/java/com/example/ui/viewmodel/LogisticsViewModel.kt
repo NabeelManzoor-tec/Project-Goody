@@ -1,6 +1,12 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -12,6 +18,17 @@ import com.example.data.model.VehicleEntity
 import com.example.data.repository.LogisticsRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+
+data class MilestoneAlert(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val shipmentId: Int,
+    val cargoType: String,
+    val oldStatus: String,
+    val newStatus: String,
+    val message: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val isRead: Boolean = false
+)
 
 data class UserAccount(
     val id: Int = 1,
@@ -31,6 +48,7 @@ enum class UserRole {
 enum class Screen {
     DASHBOARD,
     ACTIVE_SHIPMENTS,
+    SUPPORT,
     BILLING,
     SETTINGS
 }
@@ -87,6 +105,16 @@ class LogisticsViewModel(
     private val _syncMessage = MutableStateFlow<String?>(null)
     val syncMessage: StateFlow<String?> = _syncMessage.asStateFlow()
 
+    // Shipper Milestone Notifications Engine
+    private val _milestoneAlerts = MutableStateFlow<List<MilestoneAlert>>(emptyList())
+    val milestoneAlerts: StateFlow<List<MilestoneAlert>> = _milestoneAlerts.asStateFlow()
+
+    val unreadMilestoneCount: StateFlow<Int> = _milestoneAlerts
+        .map { list -> list.count { !it.isRead } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    private val previousStatusMap = mutableMapOf<Int, String>()
+
     // Database Flows
     val shipments: StateFlow<List<ShipmentEntity>> = repository.allShipments
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -97,11 +125,27 @@ class LogisticsViewModel(
     val vehicles: StateFlow<List<VehicleEntity>> = repository.allVehicles
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val supportTickets: StateFlow<List<com.example.data.model.SupportTicketEntity>> = repository.allSupportTickets
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allChatMessages: StateFlow<List<com.example.data.model.ChatMessageEntity>> = repository.allChatMessages
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val unreadChatCount: StateFlow<Int> = allChatMessages
+        .map { list ->
+            val curUser = currentUser.value?.name ?: ""
+            list.count { !it.isRead && it.senderName != curUser }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
     // Selected vehicle for Vehicle Owner role
     private val _selectedVehicleId = MutableStateFlow<Int?>(null)
     val selectedVehicleId: StateFlow<Int?> = _selectedVehicleId.asStateFlow()
 
     init {
+        createNotificationChannel()
+        setupShipmentMilestoneObserver()
+
         viewModelScope.launch {
             repository.prepopulateIfEmpty()
             // Default to first vehicle for Owner role if available
@@ -347,7 +391,38 @@ class LogisticsViewModel(
                 bidAmount = bidAmount,
                 status = "PENDING"
             )
-            repository.insertBid(bid)
+            val insertedBidId = repository.insertBid(bid).toInt()
+
+            // Initialize communication channel between driver & consignee immediately
+            val shipment = shipments.value.find { it.id == shipmentId }
+            val consigneeName = shipment?.senderName ?: "Shipper/Consignee"
+
+            repository.insertChatMessage(
+                com.example.data.model.ChatMessageEntity(
+                    shipmentId = shipmentId,
+                    bidId = insertedBidId,
+                    senderRole = "SYSTEM",
+                    senderName = "System Logistics Core",
+                    receiverName = consigneeName,
+                    message = "💬 Channel Initialized: Driver ${vehicle.driverName} placed a bid of $${String.format("%.2f", bidAmount)}.",
+                    messageType = "SYSTEM"
+                )
+            )
+
+            // Send introductory driver greeting
+            repository.insertChatMessage(
+                com.example.data.model.ChatMessageEntity(
+                    shipmentId = shipmentId,
+                    bidId = insertedBidId,
+                    senderRole = "DRIVER",
+                    senderName = vehicle.driverName,
+                    receiverName = consigneeName,
+                    message = "Hello! I placed a bid on your cargo (${shipment?.cargoType ?: "Shipment"}). Ready to discuss pickup details, gate instructions, and schedule.",
+                    messageType = "TEXT"
+                )
+            )
+
+            _syncMessage.value = "Bid placed! Communication channel created with Shipper."
         }
     }
 
@@ -355,6 +430,96 @@ class LogisticsViewModel(
     fun acceptBid(shipmentId: Int, bidId: Int) {
         viewModelScope.launch {
             repository.acceptBid(shipmentId, bidId)
+
+            val shipment = shipments.value.find { it.id == shipmentId }
+            val curUser = currentUser.value?.name ?: "Shipper"
+            val driver = shipment?.driverName ?: "Fleet Driver"
+
+            repository.insertChatMessage(
+                com.example.data.model.ChatMessageEntity(
+                    shipmentId = shipmentId,
+                    bidId = bidId,
+                    senderRole = "SYSTEM",
+                    senderName = "System Logistics Core",
+                    receiverName = driver,
+                    message = "🎉 Bid Accepted! $curUser matched with $driver. Direct chat & call line locked in.",
+                    messageType = "SYSTEM"
+                )
+            )
+
+            _syncMessage.value = "Bid accepted! Driver notified & direct call line active."
+        }
+    }
+
+    // --- Communication Channel (Chat & Call) Functions ---
+
+    fun getMessagesForShipment(shipmentId: Int): Flow<List<com.example.data.model.ChatMessageEntity>> {
+        return repository.getMessagesForShipment(shipmentId)
+    }
+
+    fun sendChatMessage(shipmentId: Int, messageText: String, receiverName: String) {
+        val user = currentUser.value ?: return
+        if (messageText.isBlank()) return
+
+        viewModelScope.launch {
+            val roleStr = when (user.role) {
+                UserRole.VEHICLE_OWNER -> "DRIVER"
+                UserRole.CONSIGNEE -> "CONSIGNEE"
+                UserRole.ADMIN -> "ADMIN"
+            }
+
+            repository.insertChatMessage(
+                com.example.data.model.ChatMessageEntity(
+                    shipmentId = shipmentId,
+                    senderRole = roleStr,
+                    senderName = user.name,
+                    receiverName = receiverName,
+                    message = messageText.trim(),
+                    messageType = "TEXT"
+                )
+            )
+        }
+    }
+
+    fun sendVoiceNote(shipmentId: Int, durationSec: Int, receiverName: String) {
+        val user = currentUser.value ?: return
+        viewModelScope.launch {
+            val roleStr = if (user.role == UserRole.VEHICLE_OWNER) "DRIVER" else "CONSIGNEE"
+            repository.insertChatMessage(
+                com.example.data.model.ChatMessageEntity(
+                    shipmentId = shipmentId,
+                    senderRole = roleStr,
+                    senderName = user.name,
+                    receiverName = receiverName,
+                    message = "🎤 Voice note recorded (${durationSec}s)",
+                    messageType = "VOICE_NOTE",
+                    voiceNoteDurationSec = durationSec
+                )
+            )
+        }
+    }
+
+    fun logCallActivity(shipmentId: Int, receiverName: String, durationStr: String) {
+        val user = currentUser.value ?: return
+        viewModelScope.launch {
+            val roleStr = if (user.role == UserRole.VEHICLE_OWNER) "DRIVER" else "CONSIGNEE"
+            repository.insertChatMessage(
+                com.example.data.model.ChatMessageEntity(
+                    shipmentId = shipmentId,
+                    senderRole = roleStr,
+                    senderName = user.name,
+                    receiverName = receiverName,
+                    message = "📞 Voice Call ended ($durationStr)",
+                    messageType = "CALL_LOG"
+                )
+            )
+        }
+    }
+
+    fun markChatMessagesRead(shipmentId: Int) {
+        val user = currentUser.value ?: return
+        viewModelScope.launch {
+            repository.markChatMessagesRead(shipmentId, user.name)
         }
     }
 
@@ -398,6 +563,22 @@ class LogisticsViewModel(
                     }
                 }
             }
+        }
+    }
+
+    fun markShipmentArrived(shipmentId: Int) {
+        viewModelScope.launch {
+            val shipment = shipments.value.find { it.id == shipmentId } ?: return@launch
+            val updated = shipment.copy(
+                status = "ARRIVED",
+                currentProgress = 0.98f,
+                currentLat = shipment.dropoffLat,
+                currentLng = shipment.dropoffLng
+            )
+            repository.updateShipment(updated)
+            _syncMessage.value = "Carrier arrived at destination dock: ${shipment.dropoffLocation}"
+            kotlinx.coroutines.delay(2000)
+            _syncMessage.value = null
         }
     }
 
@@ -452,6 +633,148 @@ class LogisticsViewModel(
             // Re-prepopulate
             repository.prepopulateIfEmpty()
         }
+    }
+
+    // 9. Support Ticket Management
+    fun submitSupportTicket(
+        shipmentId: Int?,
+        category: String,
+        priority: String,
+        description: String
+    ) {
+        viewModelScope.launch {
+            val user = currentUser.value
+            val role = currentRole.value
+            val ticket = com.example.data.model.SupportTicketEntity(
+                userRole = role.name,
+                userName = user?.name ?: "Logistics User",
+                userEmail = user?.email ?: "user@logistics.com",
+                userPhone = user?.phone ?: "+1 (555) 019-2834",
+                shipmentId = shipmentId,
+                issueCategory = category,
+                priority = priority,
+                description = description,
+                status = "OPEN"
+            )
+            repository.insertSupportTicket(ticket)
+            _syncMessage.value = "Support problem report submitted successfully! Dispatch agent notified."
+            kotlinx.coroutines.delay(2500)
+            _syncMessage.value = null
+        }
+    }
+
+    fun respondToSupportTicket(ticketId: Int, status: String, response: String) {
+        viewModelScope.launch {
+            repository.respondToSupportTicket(ticketId, status, response)
+            _syncMessage.value = "Support ticket updated to status: $status"
+            kotlinx.coroutines.delay(2000)
+            _syncMessage.value = null
+        }
+    }
+
+    // --- Local Notification & Milestone Observer Engine ---
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channelId = "shipper_milestone_channel"
+            val channelName = "Shipper Milestone Notifications"
+            val descriptionText = "Alerts shippers when a delivery milestone status changes"
+            val importance = NotificationManager.IMPORTANCE_HIGH
+            val channel = NotificationChannel(channelId, channelName, importance).apply {
+                description = descriptionText
+                enableVibration(true)
+            }
+            val notificationManager = getApplication<Application>().getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun setupShipmentMilestoneObserver() {
+        viewModelScope.launch {
+            repository.allShipments.collect { shipmentList ->
+                for (shipment in shipmentList) {
+                    val oldStatus = previousStatusMap[shipment.id]
+                    if (oldStatus != null && oldStatus != shipment.status) {
+                        handleMilestoneChange(shipment, oldStatus, shipment.status)
+                    }
+                    previousStatusMap[shipment.id] = shipment.status
+                }
+            }
+        }
+    }
+
+    private fun handleMilestoneChange(shipment: ShipmentEntity, oldStatus: String, newStatus: String) {
+        val readableOld = formatStatusLabel(oldStatus)
+        val readableNew = formatStatusLabel(newStatus)
+        val msg = "Shipment #${shipment.id} (${shipment.cargoType}) milestone changed: $readableOld ➔ $readableNew"
+
+        val alert = MilestoneAlert(
+            shipmentId = shipment.id,
+            cargoType = shipment.cargoType,
+            oldStatus = oldStatus,
+            newStatus = newStatus,
+            message = msg
+        )
+
+        _milestoneAlerts.value = listOf(alert) + _milestoneAlerts.value
+        _syncMessage.value = "🔔 Shipper Alert: Cargo [${shipment.cargoType}] is now $readableNew"
+
+        postLocalSystemNotification(
+            shipmentId = shipment.id,
+            cargoType = shipment.cargoType,
+            oldStatus = readableOld,
+            newStatus = readableNew
+        )
+    }
+
+    private fun postLocalSystemNotification(
+        shipmentId: Int,
+        cargoType: String,
+        oldStatus: String,
+        newStatus: String
+    ) {
+        val context = getApplication<Application>()
+        val channelId = "shipper_milestone_channel"
+        val title = "🚚 Milestone Update: $cargoType"
+        val text = "Shipment #$shipmentId moved from $oldStatus to $newStatus"
+
+        val builder = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$text.\nTap to view live tracking and delivery details."))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setVibrate(longArrayOf(0, 250, 100, 250))
+
+        try {
+            val notificationManager = NotificationManagerCompat.from(context)
+            val notificationId = (shipmentId * 1000) + (System.currentTimeMillis() % 1000).toInt()
+            notificationManager.notify(notificationId, builder.build())
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun formatStatusLabel(status: String): String {
+        return when (status) {
+            "PENDING_BIDS" -> "Pending Bids"
+            "MATCHED" -> "Pickup Confirmed"
+            "IN_TRANSIT" -> "In Transit"
+            "ARRIVED" -> "Arrived at Dock"
+            "DELIVERED" -> "Delivered & Signed"
+            else -> status
+        }
+    }
+
+    fun markAlertAsRead(alertId: String) {
+        _milestoneAlerts.value = _milestoneAlerts.value.map {
+            if (it.id == alertId) it.copy(isRead = true) else it
+        }
+    }
+
+    fun clearAllMilestoneAlerts() {
+        _milestoneAlerts.value = emptyList()
     }
 
     data class Quadruplet(val first: Float, val second: Float, val third: Float, val fourth: Float)

@@ -2,7 +2,9 @@ package com.example.data.repository
 
 import com.example.data.dao.LogisticsDao
 import com.example.data.model.BidEntity
+import com.example.data.model.ChatMessageEntity
 import com.example.data.model.ShipmentEntity
+import com.example.data.model.SupportTicketEntity
 import com.example.data.model.VehicleEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -12,6 +14,32 @@ class LogisticsRepository(private val logisticsDao: LogisticsDao) {
     val allShipments: Flow<List<ShipmentEntity>> = logisticsDao.getAllShipments()
     val allBids: Flow<List<BidEntity>> = logisticsDao.getAllBids()
     val allVehicles: Flow<List<VehicleEntity>> = logisticsDao.getAllVehicles()
+    val allSupportTickets: Flow<List<SupportTicketEntity>> = logisticsDao.getAllSupportTickets()
+    val allChatMessages: Flow<List<ChatMessageEntity>> = logisticsDao.getAllChatMessages()
+
+    fun getMessagesForShipment(shipmentId: Int): Flow<List<ChatMessageEntity>> {
+        return logisticsDao.getMessagesForShipment(shipmentId)
+    }
+
+    suspend fun insertChatMessage(message: ChatMessageEntity): Long {
+        return logisticsDao.insertChatMessage(message)
+    }
+
+    suspend fun markChatMessagesRead(shipmentId: Int, currentUserName: String) {
+        logisticsDao.markChatMessagesRead(shipmentId, currentUserName)
+    }
+
+    fun getSupportTicketsByUserEmail(email: String): Flow<List<SupportTicketEntity>> {
+        return logisticsDao.getSupportTicketsByUserEmail(email)
+    }
+
+    suspend fun insertSupportTicket(ticket: SupportTicketEntity): Long {
+        return logisticsDao.insertSupportTicket(ticket)
+    }
+
+    suspend fun respondToSupportTicket(ticketId: Int, status: String, response: String) {
+        logisticsDao.respondToSupportTicket(ticketId, status, response)
+    }
 
     fun getShipmentById(id: Int): Flow<ShipmentEntity?> {
         return logisticsDao.getShipmentById(id)
@@ -284,6 +312,92 @@ class LogisticsRepository(private val logisticsDao: LogisticsDao) {
                     vehicleType = "Box Truck",
                     bidAmount = 420.0,
                     status = "ACCEPTED"
+                )
+            )
+            // 4. Insert Seed Support Tickets
+            logisticsDao.insertSupportTicket(
+                com.example.data.model.SupportTicketEntity(
+                    userRole = "VEHICLE_OWNER",
+                    userName = "Dave Miller (Fleet Driver)",
+                    userEmail = "driver@logistics.com",
+                    userPhone = "+1 (555) 762-1082",
+                    shipmentId = s1Id,
+                    issueCategory = "Route & Address Help",
+                    priority = "HIGH",
+                    description = "Heavy construction on Interstate 80 causing 45 min delay. Requesting updated dock clearance window at SEZ Gate 4.",
+                    status = "IN_PROGRESS",
+                    supportResponse = "Dispatch Ops notified SEZ Gate 4 manager. Your arrival window has been extended to 16:30 hrs."
+                )
+            )
+
+            logisticsDao.insertSupportTicket(
+                com.example.data.model.SupportTicketEntity(
+                    userRole = "CONSIGNEE",
+                    userName = "EcoTech Shipper Corp",
+                    userEmail = "shipper@logistics.com",
+                    userPhone = "+1 (555) 892-1001",
+                    shipmentId = s2Id,
+                    issueCategory = "Cargo Damage",
+                    priority = "CRITICAL",
+                    description = "Requesting temperature verification report for refrigerated cargo transit before offloading at Central Warehouse.",
+                    status = "OPEN",
+                    supportResponse = null
+                )
+            )
+
+            // 5. Insert Seed Chat Messages between Drivers and Consignees
+            logisticsDao.insertChatMessage(
+                ChatMessageEntity(
+                    shipmentId = s1Id,
+                    senderRole = "SYSTEM",
+                    senderName = "System Logistics Core",
+                    receiverName = "EcoTech Shipper Corp",
+                    message = "💬 Channel Created: Driver Sarah Connor accepted cargo for Industrial Turbines.",
+                    messageType = "SYSTEM"
+                )
+            )
+
+            logisticsDao.insertChatMessage(
+                ChatMessageEntity(
+                    shipmentId = s1Id,
+                    senderRole = "DRIVER",
+                    senderName = "Sarah Connor",
+                    receiverName = "EcoTech Shipper Corp",
+                    message = "Hello! I am loading the Industrial Turbines in SEZ Port Terminal A now. Temperature controls are active at 4°C.",
+                    messageType = "TEXT"
+                )
+            )
+
+            logisticsDao.insertChatMessage(
+                ChatMessageEntity(
+                    shipmentId = s1Id,
+                    senderRole = "CONSIGNEE",
+                    senderName = "EcoTech Shipper Corp",
+                    receiverName = "Sarah Connor",
+                    message = "Great! Please ask for Supervisor Mark at Industrial Park Gate 4 upon arrival.",
+                    messageType = "TEXT"
+                )
+            )
+
+            logisticsDao.insertChatMessage(
+                ChatMessageEntity(
+                    shipmentId = s2Id,
+                    senderRole = "SYSTEM",
+                    senderName = "System Logistics Core",
+                    receiverName = "Apex Hardware Corp",
+                    message = "💬 Bid Discussion Channel Opened: Driver Dave Miller placed a bid of $2,250.00.",
+                    messageType = "SYSTEM"
+                )
+            )
+
+            logisticsDao.insertChatMessage(
+                ChatMessageEntity(
+                    shipmentId = s2Id,
+                    senderRole = "DRIVER",
+                    senderName = "Dave Miller",
+                    receiverName = "Apex Hardware Corp",
+                    message = "Hi! I have a Semi Truck with 18T capacity available in Steel Works East. Can pick up within 30 minutes of bid acceptance.",
+                    messageType = "TEXT"
                 )
             )
         }

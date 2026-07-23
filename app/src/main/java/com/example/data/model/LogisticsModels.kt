@@ -54,3 +54,19 @@ data class VehicleEntity(
     val isAvailable: Boolean = true,
     val phone: String = "+1 (555) 019-2834"
 )
+
+@Entity(tableName = "support_tickets")
+data class SupportTicketEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val userRole: String, // "CONSIGNEE", "VEHICLE_OWNER", "ADMIN"
+    val userName: String,
+    val userEmail: String,
+    val userPhone: String = "+1 (555) 019-2834",
+    val shipmentId: Int? = null,
+    val issueCategory: String, // "Delivery Delay", "Cargo Damage", "Vehicle Mechanical", "Route & Address Help", "Unreachable Recipient", "Billing / Dispute", "Other"
+    val priority: String = "MEDIUM", // "LOW", "MEDIUM", "HIGH", "CRITICAL"
+    val description: String,
+    val status: String = "OPEN", // "OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"
+    val supportResponse: String? = null,
+    val timestamp: Long = System.currentTimeMillis()
+)

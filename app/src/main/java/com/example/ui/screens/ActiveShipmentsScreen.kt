@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
@@ -22,7 +23,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.BidEntity
 import com.example.data.model.ShipmentEntity
+import com.example.ui.components.ChatAndCallDialog
+import com.example.ui.components.VoiceCallDialog
 import com.example.ui.viewmodel.LogisticsViewModel
 import com.example.ui.viewmodel.UserRole
 import kotlinx.coroutines.flow.Flow
@@ -41,7 +43,6 @@ fun ActiveShipmentsScreen(
 ) {
     val shipments by viewModel.shipments.collectAsState()
     val selectedId by viewModel.selectedShipmentId.collectAsState()
-    val bids by viewModel.bids.collectAsState()
     val role by viewModel.currentRole.collectAsState()
 
     var filterStatus by remember { mutableStateOf("ALL") } // "ALL", "PENDING_BIDS", "MATCHED", "IN_TRANSIT", "DELIVERED"
@@ -51,21 +52,92 @@ fun ActiveShipmentsScreen(
 
     val selectedShipment = shipments.find { it.id == selectedId }
 
-    Row(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(top = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Left Column: Shipments Master List
+    var activeChatShipmentId by remember { mutableStateOf<Int?>(null) }
+    var activeChatRecipientName by remember { mutableStateOf("") }
+    var activeChatRecipientPhone by remember { mutableStateOf("") }
+    var activeChatRecipientSubtext by remember { mutableStateOf("") }
+
+    var activeCallShipmentId by remember { mutableStateOf<Int?>(null) }
+    var activeCallRecipientName by remember { mutableStateOf("") }
+    var activeCallRecipientPhone by remember { mutableStateOf("") }
+    var activeCallRecipientSubtext by remember { mutableStateOf("") }
+
+    if (activeChatShipmentId != null) {
+        ChatAndCallDialog(
+            shipmentId = activeChatShipmentId!!,
+            recipientName = activeChatRecipientName,
+            recipientPhone = activeChatRecipientPhone,
+            recipientSubtext = activeChatRecipientSubtext,
+            viewModel = viewModel,
+            onDismiss = { activeChatShipmentId = null }
+        )
+    }
+
+    if (activeCallShipmentId != null) {
+        VoiceCallDialog(
+            shipmentId = activeCallShipmentId!!,
+            recipientName = activeCallRecipientName,
+            recipientPhone = activeCallRecipientPhone,
+            recipientSubtext = activeCallRecipientSubtext,
+            viewModel = viewModel,
+            onDismiss = { activeCallShipmentId = null }
+        )
+    }
+
+    if (selectedShipment == null) {
+        // --- MASTER LIST VIEW: Clean Full Width Ledger of Deliveries ---
         Column(
-            modifier = Modifier
-                .weight(1.2f)
-                .fillMaxHeight()
-                .padding(start = 16.dp),
+            modifier = modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Filter Bar
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Active Deliveries Ledger",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Select any delivery load to open focused driver view & milestone controls",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.LocalShipping,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "${filteredShipments.size} Active",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
+            // Status Filter Tabs
             ScrollableTabRow(
                 selectedTabIndex = getStatusIndex(filterStatus),
                 edgePadding = 0.dp,
@@ -85,7 +157,7 @@ fun ActiveShipmentsScreen(
                         text = {
                             Text(
                                 text = getFilterLabel(status),
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -101,76 +173,135 @@ fun ActiveShipmentsScreen(
                         .weight(1f),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "No shipments match this filter.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Filled.LocalShipping,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "No shipments match this status filter.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(bottom = 16.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
                     items(filteredShipments) { shipment ->
-                        val isSelected = shipment.id == selectedId
-                        Card(
+                        ElevatedCard(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { viewModel.selectShipment(shipment.id) },
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isSelected) {
-                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                                }
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.elevatedCardColors(
+                                containerColor = MaterialTheme.colorScheme.surface
                             ),
-                            border = if (isSelected) {
-                                BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
-                            } else null,
-                            shape = RoundedCornerShape(12.dp)
+                            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
+                            Column(modifier = Modifier.padding(16.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = shipment.cargoType,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Inventory2,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = shipment.cargoType,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
                                     StatusBadge(shipment.status)
                                 }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "${shipment.pickupLocation} ➔ ${shipment.dropoffLocation}",
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Route visual row
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Place,
+                                        contentDescription = null,
+                                        tint = Color(0xFF10B981),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = shipment.pickupLocation,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        text = " ➔ ",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Filled.LocationOn,
+                                        contentDescription = null,
+                                        tint = Color(0xFFEF4444),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = shipment.dropoffLocation,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = "Base Rate: ${formatCurrency(shipment.basePrice)}",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    if (shipment.acceptedBidPrice != null) {
+                                    Column {
                                         Text(
-                                            text = "Final Rate: ${formatCurrency(shipment.acceptedBidPrice)}",
+                                            text = "Weight: ${shipment.weightKg} kg | Zone: ${shipment.zone}",
                                             fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
+                                        Text(
+                                            text = if (shipment.acceptedBidPrice != null) "Agreed Rate: ${formatCurrency(shipment.acceptedBidPrice)}" else "Base Rate: ${formatCurrency(shipment.basePrice)}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (shipment.acceptedBidPrice != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+
+                                    Button(
+                                        onClick = { viewModel.selectShipment(shipment.id) },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                        modifier = Modifier.testTag("focus_delivery_${shipment.id}")
+                                    ) {
+                                        Text("Focus Delivery ➔", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -179,411 +310,621 @@ fun ActiveShipmentsScreen(
                 }
             }
         }
-
-        // Right Column: Shipment Details & Interactive Simulator Tracking Map
+    } else {
+        // --- DEDICATED FOCUSED DELIVERY DETAIL SCREEN ---
         Column(
-            modifier = Modifier
-                .weight(1.8f)
-                .fillMaxHeight()
-                .padding(end = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            if (selectedShipment == null) {
-                Card(
+            // Top Navigation & Delivery Header
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                )
+            ) {
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f)
-                    ),
-                    shape = RoundedCornerShape(16.dp)
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        IconButton(
+                            onClick = { viewModel.selectShipment(null) },
+                            modifier = Modifier.testTag("back_to_active_ledger")
+                        ) {
                             Icon(
-                                imageVector = Icons.Filled.LocalShipping,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.size(56.dp)
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back to Active Deliveries List",
+                                tint = MaterialTheme.colorScheme.primary
                             )
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Focused Delivery #${selectedShipment.id}",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                StatusBadge(selectedShipment.status)
+                            }
                             Text(
-                                text = "Select a shipment from the ledger to view real-time tracking, live bids, and simulation details.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                textAlign = TextAlign.Center,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 24.dp)
+                                text = "${selectedShipment.cargoType} • ${selectedShipment.weightKg} kg",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
+
+                    // Quick Support Button
+                    OutlinedButton(
+                        onClick = { viewModel.setScreen(com.example.ui.viewmodel.Screen.SUPPORT) },
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.testTag("focused_header_support")
+                    ) {
+                        Icon(Icons.Filled.HeadsetMic, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Support", fontSize = 11.sp)
+                    }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // 1. Live Interactive Tracking Map Card
-                    item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Map,
-                                            contentDescription = "Map",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "Simulated GPS Location Tracker",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Focused Delivery Details Scroll View
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                contentPadding = PaddingValues(bottom = 24.dp)
+            ) {
+                // 1. Live GPS Route Tracking Map
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Map,
+                                        contentDescription = "Map",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Real-Time GPS Location & Route",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                                if (selectedShipment.status == "IN_TRANSIT") {
+                                    Text(
+                                        text = "In Transit (${(selectedShipment.currentProgress * 100).toInt()}% • ETA 18 mins)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Vector Custom Canvas Map Drawer
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF1E293B)) // Deep slate-dark background
+                                    .border(1.dp, Color(0xFF334155), RoundedCornerShape(12.dp))
+                            ) {
+                                val pickupLabel = selectedShipment.pickupLocation
+                                val dropoffLabel = selectedShipment.dropoffLocation
+                                val progress = selectedShipment.currentProgress
+                                val status = selectedShipment.status
+
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    val padding = 44.dp.toPx()
+                                    val width = size.width
+                                    val height = size.height
+
+                                    val pickupOffset = Offset(padding, height / 2)
+                                    val dropoffOffset = Offset(width - padding, height / 2)
+                                    val currentOffset = Offset(
+                                        pickupOffset.x + progress * (dropoffOffset.x - pickupOffset.x),
+                                        pickupOffset.y
+                                    )
+
+                                    // Dotted path line
+                                    drawLine(
+                                        color = Color(0xFF64748B),
+                                        start = pickupOffset,
+                                        end = dropoffOffset,
+                                        strokeWidth = 3f,
+                                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                                    )
+
+                                    // Progress trail line
+                                    if (progress > 0.0f) {
+                                        drawLine(
+                                            color = Color(0xFF3B82F6),
+                                            start = pickupOffset,
+                                            end = currentOffset,
+                                            strokeWidth = 5f
                                         )
                                     }
-                                    if (selectedShipment.status == "IN_TRANSIT") {
-                                        Text(
-                                            text = "In Transit (${(selectedShipment.currentProgress * 100).toInt()}% ETA 18 mins)",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
+
+                                    // Pickup Point (Green pin)
+                                    drawCircle(
+                                        color = Color(0xFF10B981),
+                                        radius = 16f,
+                                        center = pickupOffset
+                                    )
+                                    drawCircle(
+                                        color = Color.White,
+                                        radius = 6f,
+                                        center = pickupOffset
+                                    )
+
+                                    // Dropoff Point (Red pin)
+                                    drawCircle(
+                                        color = Color(0xFFEF4444),
+                                        radius = 16f,
+                                        center = dropoffOffset
+                                    )
+                                    drawCircle(
+                                        color = Color.White,
+                                        radius = 6f,
+                                        center = dropoffOffset
+                                    )
+
+                                    // Active Carrier Truck Node (Blue)
+                                    if (status == "IN_TRANSIT" || status == "MATCHED" || status == "ARRIVED" || status == "DELIVERED") {
+                                        drawCircle(
+                                            color = Color(0xFF3B82F6),
+                                            radius = 22f,
+                                            center = currentOffset
+                                        )
+                                        drawCircle(
+                                            color = Color.White,
+                                            radius = 10f,
+                                            center = currentOffset
                                         )
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                // Vector Custom Canvas Map Drawer
-                                Box(
+                                Text(
+                                    text = "Pickup: $pickupLabel",
+                                    color = Color(0xFF10B981),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(180.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color(0xFF1E293B)) // Deep slate-dark background
-                                        .border(1.dp, Color(0xFF334155), RoundedCornerShape(12.dp))
-                                ) {
-                                    val pickupLabel = selectedShipment.pickupLocation
-                                    val dropoffLabel = selectedShipment.dropoffLocation
-                                    val progress = selectedShipment.currentProgress
-                                    val status = selectedShipment.status
+                                        .align(Alignment.CenterStart)
+                                        .padding(start = 12.dp, top = 56.dp)
+                                )
 
-                                    Canvas(modifier = Modifier.fillMaxSize()) {
-                                        val padding = 40.dp.toPx()
-                                        val width = size.width
-                                        val height = size.height
+                                Text(
+                                    text = "Dropoff: $dropoffLabel",
+                                    color = Color(0xFFEF4444),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .align(Alignment.CenterEnd)
+                                        .padding(end = 12.dp, top = 56.dp)
+                                )
+                            }
+                        }
+                    }
+                }
 
-                                        // Node coords
-                                        val pickupOffset = Offset(padding, height / 2)
-                                        val dropoffOffset = Offset(width - padding, height / 2)
-                                        val currentOffset = Offset(
-                                            pickupOffset.x + progress * (dropoffOffset.x - pickupOffset.x),
-                                            pickupOffset.y
-                                        )
+                // 2. Milestone Delivery Status Timeline (Pickup, Transit, Arrived, Delivered)
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text(
+                                text = "Milestone Delivery Status Timeline",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
 
-                                        // Draw dotted path line
-                                        drawLine(
-                                            color = Color(0xFF64748B),
-                                            start = pickupOffset,
-                                            end = dropoffOffset,
-                                            strokeWidth = 3f,
-                                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
-                                        )
+                            val currentStatus = selectedShipment.status
+                            val progress = selectedShipment.currentProgress
 
-                                        // Draw Completed progress line
-                                        if (progress > 0.0f) {
-                                            drawLine(
-                                                color = Color(0xFF3B82F6), // Blue transit trail
-                                                start = pickupOffset,
-                                                end = currentOffset,
-                                                strokeWidth = 5f
-                                            )
-                                        }
+                            val isPickupDone = currentStatus == "MATCHED" || currentStatus == "IN_TRANSIT" || currentStatus == "ARRIVED" || currentStatus == "DELIVERED"
+                            val isTransitDone = currentStatus == "ARRIVED" || currentStatus == "DELIVERED" || (currentStatus == "IN_TRANSIT" && progress >= 0.85f)
+                            val isArrivedDone = currentStatus == "ARRIVED" || currentStatus == "DELIVERED" || progress >= 0.98f
+                            val isDeliveredDone = currentStatus == "DELIVERED"
 
-                                        // Draw Pickup Point (Green pin)
-                                        drawCircle(
-                                            color = Color(0xFF10B981),
-                                            radius = 16f,
-                                            center = pickupOffset
-                                        )
-                                        drawCircle(
-                                            color = Color.White,
-                                            radius = 6f,
-                                            center = pickupOffset
-                                        )
+                            // Horizontal Stage Bar
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    .padding(vertical = 10.dp, horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceAround,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                MilestoneBadgeStep("Pickup", isPickupDone, currentStatus == "MATCHED" || currentStatus == "PENDING_BIDS")
+                                Text("➔", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                MilestoneBadgeStep("Transit", isTransitDone, currentStatus == "IN_TRANSIT")
+                                Text("➔", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                MilestoneBadgeStep("Arrived", isArrivedDone, currentStatus == "ARRIVED" || (currentStatus == "IN_TRANSIT" && progress >= 0.9f))
+                                Text("➔", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                MilestoneBadgeStep("Delivered", isDeliveredDone, currentStatus == "DELIVERED")
+                            }
 
-                                        // Draw Dropoff Point (Red pin)
-                                        drawCircle(
-                                            color = Color(0xFFEF4444),
-                                            radius = 16f,
-                                            center = dropoffOffset
-                                        )
-                                        drawCircle(
-                                            color = Color.White,
-                                            radius = 6f,
-                                            center = dropoffOffset
-                                        )
+                            Spacer(modifier = Modifier.height(16.dp))
 
-                                        // Draw Active Carrier Truck Node (Blue) if MATCHED or IN_TRANSIT
-                                        if (status == "IN_TRANSIT" || status == "MATCHED" || status == "DELIVERED") {
-                                            drawCircle(
-                                                color = Color(0xFF3B82F6),
-                                                radius = 22f,
-                                                center = currentOffset
-                                            )
-                                            drawCircle(
-                                                color = Color.White,
-                                                radius = 10f,
-                                                center = currentOffset
-                                            )
-                                        }
+                            MilestoneItem(
+                                title = "1. Pickup Stage",
+                                description = if (isPickupDone) "Cargo successfully picked up at origin (${selectedShipment.pickupLocation})." else "Awaiting carrier dispatch & pickup at ${selectedShipment.pickupLocation}.",
+                                isDone = isPickupDone,
+                                isActive = currentStatus == "PENDING_BIDS" || currentStatus == "MATCHED"
+                            )
+                            MilestoneItem(
+                                title = "2. Transit Stage",
+                                description = if (currentStatus == "IN_TRANSIT") "Carrier actively on route. Live Progress: ${(progress * 100).toInt()}%" else if (isTransitDone) "Highway transit completed." else "Pending pickup departure.",
+                                isDone = isTransitDone,
+                                isActive = currentStatus == "IN_TRANSIT"
+                            )
+                            MilestoneItem(
+                                title = "3. Arrived Stage",
+                                description = if (isArrivedDone || currentStatus == "ARRIVED") "Vehicle arrived at dropoff dock (${selectedShipment.dropoffLocation}). Offloading in progress." else "Vehicle en route to destination dock.",
+                                isDone = isArrivedDone,
+                                isActive = currentStatus == "ARRIVED" || (currentStatus == "IN_TRANSIT" && progress >= 0.90f)
+                            )
+                            MilestoneItem(
+                                title = "4. Delivered Stage",
+                                description = if (isDeliveredDone) "Handed over to recipient (${selectedShipment.receiverName}). Proof of delivery signed." else "Awaiting final consignee inspection and delivery sign-off.",
+                                isDone = isDeliveredDone,
+                                isActive = currentStatus == "DELIVERED"
+                            )
+                        }
+                    }
+                }
+
+                // 3. Driver Operational Focus Console
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Filled.PlayArrow,
+                                    contentDescription = "Sim",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Driver Delivery Focus Panel",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Driver actions to advance stages, send GPS pulses, and complete proof of delivery.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (selectedShipment.status == "MATCHED") {
+                                    Button(
+                                        onClick = { viewModel.startShipmentTransit(selectedShipment.id) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("start_transit_button")
+                                    ) {
+                                        Text("Confirm Pickup & Start Transit", fontSize = 11.sp)
+                                    }
+                                }
+
+                                if (selectedShipment.status == "IN_TRANSIT") {
+                                    Button(
+                                        onClick = { viewModel.simulateTransitLocationUpdate(selectedShipment.id) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("gps_pulse_button")
+                                    ) {
+                                        Text("Pulse GPS", fontSize = 11.sp)
                                     }
 
-                                    // Graphical Labels overlay on Map
-                                    Text(
-                                        text = pickupLabel,
-                                        color = Color(0xFF10B981),
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
+                                    Button(
+                                        onClick = { viewModel.markShipmentArrived(selectedShipment.id) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
                                         modifier = Modifier
-                                            .align(Alignment.CenterStart)
-                                            .padding(start = 12.dp, top = 48.dp)
-                                    )
+                                            .weight(1f)
+                                            .testTag("mark_arrived_button")
+                                    ) {
+                                        Text("Mark Arrived", fontSize = 11.sp)
+                                    }
 
-                                    Text(
-                                        text = dropoffLabel,
-                                        color = Color(0xFFEF4444),
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
+                                    OutlinedButton(
+                                        onClick = { viewModel.setScreen(com.example.ui.viewmodel.Screen.SUPPORT) },
                                         modifier = Modifier
-                                            .align(Alignment.CenterEnd)
-                                            .padding(end = 12.dp, top = 48.dp)
+                                            .weight(1f)
+                                            .testTag("shipment_support_button")
+                                    ) {
+                                        Icon(Icons.Filled.HeadsetMic, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Support", fontSize = 11.sp)
+                                    }
+                                }
+
+                                if (selectedShipment.status == "ARRIVED") {
+                                    Button(
+                                        onClick = { viewModel.markShipmentDelivered(selectedShipment.id) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("complete_delivery_button")
+                                    ) {
+                                        Text("Complete Delivery & Sign", fontSize = 11.sp)
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { viewModel.setScreen(com.example.ui.viewmodel.Screen.SUPPORT) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("shipment_support_button")
+                                    ) {
+                                        Icon(Icons.Filled.HeadsetMic, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Support", fontSize = 11.sp)
+                                    }
+                                }
+
+                                if (selectedShipment.status != "MATCHED" && selectedShipment.status != "IN_TRANSIT" && selectedShipment.status != "ARRIVED") {
+                                    Text(
+                                        text = if (selectedShipment.status == "DELIVERED") "Shipment delivered & completed." else "Waiting for carrier matching/bidding to start transit.",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(8.dp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
                         }
                     }
+                }
 
-                    // 2. Shipment Progress Timeline (Milestones)
+                // 4. Freight Specifications & Contact Card
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text(
+                                text = "Freight & Contact Specifications",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Origin Sender", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(selectedShipment.senderName, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text(selectedShipment.pickupLocation, fontSize = 11.sp)
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Destination Consignee", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(selectedShipment.receiverName, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text(selectedShipment.dropoffLocation, fontSize = 11.sp)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text("Cargo Weight: ${selectedShipment.weightKg} kg", fontSize = 11.sp)
+                                    Text("Freight Zone: ${selectedShipment.zone}", fontSize = 11.sp)
+                                }
+                                Column {
+                                    Text(
+                                        text = if (selectedShipment.acceptedBidPrice != null) "Agreed Rate: ${formatCurrency(selectedShipment.acceptedBidPrice)}" else "Base Rate: ${formatCurrency(selectedShipment.basePrice)}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    if (selectedShipment.driverName != null) {
+                                        Text("Driver: ${selectedShipment.driverName}", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Direct Communication Channel
+                            Text(
+                                text = "Direct Communication Channel",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = if (role == UserRole.CONSIGNEE) "Discuss logistics & delivery instructions with ${selectedShipment.driverName ?: "Carrier"}" else "Negotiate fare & discuss pickup logistics with ${selectedShipment.senderName}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        activeCallShipmentId = selectedShipment.id
+                                        val otherParty = if (role == UserRole.CONSIGNEE) (selectedShipment.driverName ?: "Assigned Driver") else selectedShipment.senderName
+                                        activeCallRecipientName = otherParty
+                                        activeCallRecipientPhone = "+1 (555) 762-1082"
+                                        activeCallRecipientSubtext = "Shipment #${selectedShipment.id} | ${selectedShipment.cargoType}"
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(38.dp)
+                                        .testTag("focused_call_button"),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(Icons.Filled.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Voice Call", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        activeChatShipmentId = selectedShipment.id
+                                        val otherParty = if (role == UserRole.CONSIGNEE) (selectedShipment.driverName ?: "Assigned Driver") else selectedShipment.senderName
+                                        activeChatRecipientName = otherParty
+                                        activeChatRecipientPhone = "+1 (555) 762-1082"
+                                        activeChatRecipientSubtext = "Shipment #${selectedShipment.id} | ${selectedShipment.cargoType}"
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(38.dp)
+                                        .testTag("focused_chat_button"),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(Icons.Filled.Chat, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Open Chat", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 5. Shipper/Consignee Bidding Panel (Visible if PENDING_BIDS)
+                if (selectedShipment.status == "PENDING_BIDS") {
                     item {
+                        val shipmentBids by viewModel.getBidsForShipment(selectedShipment.id).collectAsState(initial = emptyList())
+
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp)
                         ) {
                             Column(modifier = Modifier.padding(14.dp)) {
                                 Text(
-                                    text = "Milestone Delivery Timeline",
+                                    text = "Active Carrier Bids Submitted",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp
                                 )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Carriers are offering these competitive freight rates. Accept to book instantly.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                                 Spacer(modifier = Modifier.height(12.dp))
 
-                                val currentStatus = selectedShipment.status
-                                val progress = selectedShipment.currentProgress
-
-                                MilestoneItem(
-                                    title = "Cargo Load Registered",
-                                    description = "Shipment posted in the zone by sender.",
-                                    isDone = true,
-                                    isActive = currentStatus == "PENDING_BIDS"
-                                )
-                                MilestoneItem(
-                                    title = "Carrier Load Matched",
-                                    description = selectedShipment.driverName?.let { "Assigned driver: $it" } ?: "Awaiting automatic match or bid acceptance.",
-                                    isDone = currentStatus != "PENDING_BIDS",
-                                    isActive = currentStatus == "MATCHED"
-                                )
-                                MilestoneItem(
-                                    title = "Freight In Transit",
-                                    description = if (currentStatus == "IN_TRANSIT") "Driver tracking is live. Progress: ${(progress*100).toInt()}%" else "Cargo loaded onto matched carrier.",
-                                    isDone = currentStatus == "IN_TRANSIT" || currentStatus == "DELIVERED",
-                                    isActive = currentStatus == "IN_TRANSIT"
-                                )
-                                MilestoneItem(
-                                    title = "Delivered & Signed",
-                                    description = "Cargo arrived at destination.",
-                                    isDone = currentStatus == "DELIVERED",
-                                    isActive = currentStatus == "DELIVERED"
-                                )
-                            }
-                        }
-                    }
-
-                    // 3. Driver Simulator Controls Console (Visible to carrier owners or admin)
-                    if (role == UserRole.VEHICLE_OWNER || role == UserRole.ADMIN) {
-                        item {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
-                                ),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
-                                shape = RoundedCornerShape(16.dp)
-                            ) {
-                                Column(modifier = Modifier.padding(14.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = Icons.Filled.PlayArrow,
-                                            contentDescription = "Sim",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "Driver Simulator Control Panel",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(6.dp))
+                                if (shipmentBids.isEmpty()) {
                                     Text(
-                                        text = "As the carrier, simulate physical hardware events like starting transit or pulsing location coordinates.",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(modifier = Modifier.height(12.dp))
-
-                                    Row(
+                                        text = "Awaiting first carrier rate bid. Bidding operates transparently.",
+                                        fontSize = 12.sp,
+                                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        if (selectedShipment.status == "MATCHED") {
-                                            Button(
-                                                onClick = { viewModel.startShipmentTransit(selectedShipment.id) },
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .testTag("start_transit_button")
-                                            ) {
-                                                Text("Start Transit", fontSize = 11.sp)
-                                            }
-                                        }
-
-                                        if (selectedShipment.status == "IN_TRANSIT") {
-                                            Button(
-                                                onClick = { viewModel.simulateTransitLocationUpdate(selectedShipment.id) },
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .testTag("gps_pulse_button")
-                                            ) {
-                                                Text("Pulse GPS Location", fontSize = 11.sp)
-                                            }
-
-                                            Button(
-                                                onClick = { viewModel.markShipmentDelivered(selectedShipment.id) },
-                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .testTag("complete_delivery_button")
-                                            ) {
-                                                Text("Arrive Destination", fontSize = 11.sp)
-                                            }
-                                        }
-
-                                        if (selectedShipment.status != "MATCHED" && selectedShipment.status != "IN_TRANSIT") {
-                                            Text(
-                                                text = "Carrier simulation is only active for matched/in-transit loads.",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(8.dp),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 4. Shipper/Consignee Bidding Panel (Visible to consignee creators to accept bids)
-                    if (selectedShipment.status == "PENDING_BIDS") {
-                        item {
-                            val shipmentBids by viewModel.getBidsForShipment(selectedShipment.id).collectAsState(initial = emptyList())
-
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp)
-                            ) {
-                                Column(modifier = Modifier.padding(14.dp)) {
-                                    Text(
-                                        text = "Active Carrier Bids Submitted",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "Carriers are offering these competitive freight rates. Accept to book instantly.",
-                                        fontSize = 11.sp,
+                                        textAlign = TextAlign.Center,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    Spacer(modifier = Modifier.height(12.dp))
+                                } else {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        shipmentBids.forEach { bid ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .border(
+                                                        width = 1.dp,
+                                                        color = MaterialTheme.colorScheme.outlineVariant,
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    )
+                                                    .padding(10.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column {
+                                                    Text(
+                                                        text = "${bid.driverName} • ${bid.vehicleType}",
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 13.sp
+                                                    )
+                                                    Text(
+                                                        text = "Plate: ${bid.plateNumber} | Amount: ${formatCurrency(bid.bidAmount)}",
+                                                        fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
 
-                                    if (shipmentBids.isEmpty()) {
-                                        Text(
-                                            text = "Awaiting first carrier rate bid. Bidding operates transparently.",
-                                            fontSize = 12.sp,
-                                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            textAlign = TextAlign.Center,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    } else {
-                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            shipmentBids.forEach { bid ->
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .border(
-                                                            width = 1.dp,
-                                                            color = MaterialTheme.colorScheme.outlineVariant,
-                                                            shape = RoundedCornerShape(8.dp)
-                                                        )
-                                                        .padding(10.dp),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Column {
-                                                        Text(
-                                                            text = "${bid.driverName} • ${bid.vehicleType}",
-                                                            fontWeight = FontWeight.Bold,
-                                                            fontSize = 13.sp
-                                                        )
-                                                        Text(
-                                                            text = "Plate: ${bid.plateNumber} | Amount: ${formatCurrency(bid.bidAmount)}",
-                                                            fontSize = 11.sp,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
+                                                if (role == UserRole.CONSIGNEE || role == UserRole.ADMIN) {
+                                                    Button(
+                                                        onClick = { viewModel.acceptBid(selectedShipment.id, bid.id) },
+                                                        modifier = Modifier
+                                                            .height(36.dp)
+                                                            .testTag("accept_bid_${bid.id}"),
+                                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    ) {
+                                                        Text("Accept Bid", fontSize = 11.sp)
                                                     }
-
-                                                    if (role == UserRole.CONSIGNEE || role == UserRole.ADMIN) {
-                                                        Button(
-                                                            onClick = { viewModel.acceptBid(selectedShipment.id, bid.id) },
-                                                            modifier = Modifier
-                                                                .height(36.dp)
-                                                                .testTag("accept_bid_${bid.id}"),
-                                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                                            shape = RoundedCornerShape(8.dp)
-                                                        ) {
-                                                            Text("Accept Bid", fontSize = 11.sp)
-                                                        }
-                                                    } else {
-                                                        Text(
-                                                            text = bid.status,
-                                                            fontSize = 12.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = MaterialTheme.colorScheme.primary
-                                                        )
-                                                    }
+                                                } else {
+                                                    Text(
+                                                        text = bid.status,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
                                                 }
                                             }
                                         }
@@ -595,6 +936,43 @@ fun ActiveShipmentsScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun MilestoneBadgeStep(
+    label: String,
+    isDone: Boolean,
+    isActive: Boolean
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(16.dp)
+                .background(
+                    color = if (isDone) Color(0xFF10B981) else if (isActive) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(8.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isDone) {
+                Icon(
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(10.dp)
+                )
+            }
+        }
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = if (isActive || isDone) FontWeight.Bold else FontWeight.Normal,
+            color = if (isDone) Color(0xFF10B981) else if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -668,3 +1046,4 @@ fun getFilterLabel(status: String): String {
         else -> status
     }
 }
+

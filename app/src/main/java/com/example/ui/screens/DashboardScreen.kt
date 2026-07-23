@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -35,6 +36,8 @@ import com.example.data.model.BidEntity
 import com.example.data.model.ShipmentEntity
 import kotlinx.coroutines.flow.Flow
 import com.example.data.model.VehicleEntity
+import com.example.ui.components.ChatAndCallDialog
+import com.example.ui.components.VoiceCallDialog
 import com.example.ui.viewmodel.LogisticsViewModel
 import com.example.ui.viewmodel.UserRole
 import com.example.ui.viewmodel.Screen
@@ -52,6 +55,38 @@ fun DashboardScreen(
     val bids by viewModel.bids.collectAsState()
     val vehicles by viewModel.vehicles.collectAsState()
     val selectedVehicleId by viewModel.selectedVehicleId.collectAsState()
+
+    var activeChatShipmentId by remember { mutableStateOf<Int?>(null) }
+    var activeChatRecipientName by remember { mutableStateOf("") }
+    var activeChatRecipientPhone by remember { mutableStateOf("") }
+    var activeChatRecipientSubtext by remember { mutableStateOf("") }
+
+    var activeCallShipmentId by remember { mutableStateOf<Int?>(null) }
+    var activeCallRecipientName by remember { mutableStateOf("") }
+    var activeCallRecipientPhone by remember { mutableStateOf("") }
+    var activeCallRecipientSubtext by remember { mutableStateOf("") }
+
+    if (activeChatShipmentId != null) {
+        ChatAndCallDialog(
+            shipmentId = activeChatShipmentId!!,
+            recipientName = activeChatRecipientName,
+            recipientPhone = activeChatRecipientPhone,
+            recipientSubtext = activeChatRecipientSubtext,
+            viewModel = viewModel,
+            onDismiss = { activeChatShipmentId = null }
+        )
+    }
+
+    if (activeCallShipmentId != null) {
+        VoiceCallDialog(
+            shipmentId = activeCallShipmentId!!,
+            recipientName = activeCallRecipientName,
+            recipientPhone = activeCallRecipientPhone,
+            recipientSubtext = activeCallRecipientSubtext,
+            viewModel = viewModel,
+            onDismiss = { activeCallShipmentId = null }
+        )
+    }
 
     LazyColumn(
         modifier = modifier
@@ -120,6 +155,7 @@ fun DashboardScreen(
         when (role) {
             UserRole.CONSIGNEE -> {
                 item { ConsigneeStatsSection(shipments, bids) }
+                item { ShipperMilestoneSummaryCard(viewModel) }
                 item { CreateShipmentCard(viewModel) }
                 item { ConsigneeShipmentsHeader() }
                 val myShipments = shipments.filter { it.senderName == "Consignee Portal" || it.senderName == "Fresh Farms Organic" || it.senderName == "Apex Hardware Corp" || it.senderName == "EcoTech Industries" || it.senderName == currentUser?.name }
@@ -127,7 +163,22 @@ fun DashboardScreen(
                     item { EmptyStateIndicator("No bookings found. Book your first freight load above.") }
                 } else {
                     items(myShipments) { shipment ->
-                        ShipmentDashboardItem(shipment, viewModel)
+                        ShipmentDashboardItem(
+                            shipment = shipment,
+                            viewModel = viewModel,
+                            onOpenChat = { id, name, phone, sub ->
+                                activeChatShipmentId = id
+                                activeChatRecipientName = name
+                                activeChatRecipientPhone = phone
+                                activeChatRecipientSubtext = sub
+                            },
+                            onOpenCall = { id, name, phone, sub ->
+                                activeCallShipmentId = id
+                                activeCallRecipientName = name
+                                activeCallRecipientPhone = phone
+                                activeCallRecipientSubtext = sub
+                            }
+                        )
                     }
                 }
             }
@@ -150,7 +201,24 @@ fun DashboardScreen(
                         item { EmptyStateIndicator("No open loads match your vehicle's zone (${currentVehicle.operatingZone}) and capacity (${currentVehicle.capacityKg} kg).") }
                     } else {
                         items(availableLoads) { shipment ->
-                            AvailableLoadDashboardItem(shipment, currentVehicle, bids, viewModel)
+                            AvailableLoadDashboardItem(
+                                shipment = shipment,
+                                vehicle = currentVehicle,
+                                bids = bids,
+                                viewModel = viewModel,
+                                onOpenChat = { id, name, phone, sub ->
+                                    activeChatShipmentId = id
+                                    activeChatRecipientName = name
+                                    activeChatRecipientPhone = phone
+                                    activeChatRecipientSubtext = sub
+                                },
+                                onOpenCall = { id, name, phone, sub ->
+                                    activeCallShipmentId = id
+                                    activeCallRecipientName = name
+                                    activeCallRecipientPhone = phone
+                                    activeCallRecipientSubtext = sub
+                                }
+                            )
                         }
                     }
                 }
@@ -282,6 +350,115 @@ fun ConsigneeStatsSection(shipments: List<ShipmentEntity>, bids: List<BidEntity>
             color = MaterialTheme.colorScheme.tertiaryContainer,
             modifier = Modifier.weight(1.2f)
         )
+    }
+}
+
+@Composable
+fun ShipperMilestoneSummaryCard(viewModel: LogisticsViewModel) {
+    val alerts by viewModel.milestoneAlerts.collectAsState()
+    val unreadCount by viewModel.unreadMilestoneCount.collectAsState()
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.NotificationsActive,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Shipper Milestone Alerts",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (alerts.isEmpty()) "Monitoring active delivery status changes" else "${alerts.size} milestone updates recorded",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                if (unreadCount > 0) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.error,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = "$unreadCount NEW",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onError,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+
+            if (alerts.isNotEmpty()) {
+                val latest = alerts.first()
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Latest: ${latest.cargoType} (#${latest.shipmentId})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = latest.message,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.selectShipment(latest.shipmentId)
+                            viewModel.setScreen(Screen.ACTIVE_SHIPMENTS)
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.testTag("track_latest_milestone_btn")
+                    ) {
+                        Text("Track ➔", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -500,7 +677,12 @@ fun ConsigneeShipmentsHeader() {
 }
 
 @Composable
-fun ShipmentDashboardItem(shipment: ShipmentEntity, viewModel: LogisticsViewModel) {
+fun ShipmentDashboardItem(
+    shipment: ShipmentEntity,
+    viewModel: LogisticsViewModel,
+    onOpenChat: (shipmentId: Int, recipientName: String, phone: String, subtext: String) -> Unit,
+    onOpenCall: (shipmentId: Int, recipientName: String, phone: String, subtext: String) -> Unit
+) {
     val shipmentBids by viewModel.getBidsForShipment(shipment.id).collectAsState(initial = emptyList())
 
     Card(
@@ -650,7 +832,7 @@ fun ShipmentDashboardItem(shipment: ShipmentEntity, viewModel: LogisticsViewMode
 
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
                                     text = formatCurrency(bid.bidAmount),
@@ -659,19 +841,63 @@ fun ShipmentDashboardItem(shipment: ShipmentEntity, viewModel: LogisticsViewMode
                                     color = MaterialTheme.colorScheme.primary
                                 )
 
+                                OutlinedIconButton(
+                                    onClick = {
+                                        onOpenCall(
+                                            shipment.id,
+                                            bid.driverName,
+                                            "+1 (555) 762-1082",
+                                            "Driver | ${bid.vehicleType} (${bid.plateNumber})"
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .testTag("call_driver_bid_${bid.id}"),
+                                    shape = CircleShape
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Phone,
+                                        contentDescription = "Call Driver",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+
+                                FilledTonalIconButton(
+                                    onClick = {
+                                        onOpenChat(
+                                            shipment.id,
+                                            bid.driverName,
+                                            "+1 (555) 762-1082",
+                                            "Driver | ${bid.vehicleType} (${bid.plateNumber})"
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .testTag("chat_driver_bid_${bid.id}"),
+                                    shape = CircleShape
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Chat,
+                                        contentDescription = "Chat Driver",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+
                                 Button(
                                     onClick = { viewModel.acceptBid(shipment.id, bid.id) },
                                     modifier = Modifier
-                                        .height(28.dp)
+                                        .height(32.dp)
                                         .testTag("accept_bid_dashboard_${bid.id}"),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                    shape = RoundedCornerShape(6.dp),
+                                    shape = RoundedCornerShape(8.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.primary,
                                         contentColor = MaterialTheme.colorScheme.onPrimary
                                     )
                                 ) {
-                                    Text("Accept", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Text("Accept", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -831,7 +1057,9 @@ fun AvailableLoadDashboardItem(
     shipment: ShipmentEntity,
     vehicle: VehicleEntity,
     bids: List<BidEntity>,
-    viewModel: LogisticsViewModel
+    viewModel: LogisticsViewModel,
+    onOpenChat: (shipmentId: Int, recipientName: String, phone: String, subtext: String) -> Unit,
+    onOpenCall: (shipmentId: Int, recipientName: String, phone: String, subtext: String) -> Unit
 ) {
     val myBidOnThis = bids.find { it.shipmentId == shipment.id && it.vehicleId == vehicle.id }
     var showBidInput by remember { mutableStateOf(false) }
@@ -886,32 +1114,83 @@ fun AvailableLoadDashboardItem(
             Spacer(modifier = Modifier.height(10.dp))
 
             if (myBidOnThis != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Filled.CheckCircle,
-                            contentDescription = "Bid placed",
-                            tint = Color(0xFF2E7D32),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Filled.CheckCircle,
+                                contentDescription = "Bid placed",
+                                tint = Color(0xFF2E7D32),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Your Bid: ${formatCurrency(myBidOnThis.bidAmount)}",
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF2E7D32),
+                                fontSize = 14.sp
+                            )
+                        }
                         Text(
-                            text = "Your Bid: ${formatCurrency(myBidOnThis.bidAmount)}",
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF2E7D32),
-                            fontSize = 14.sp
+                            text = "Status: ${myBidOnThis.status}",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Bold
                         )
                     }
-                    Text(
-                        text = "Status: ${myBidOnThis.status}",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Bold
-                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                onOpenCall(
+                                    shipment.id,
+                                    shipment.senderName,
+                                    "+1 (555) 438-2910",
+                                    "Shipper / Consignee | Cargo: ${shipment.cargoType}"
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .testTag("call_shipper_bid_${shipment.id}"),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Icon(Icons.Filled.Phone, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Call Shipper", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                onOpenChat(
+                                    shipment.id,
+                                    shipment.senderName,
+                                    "+1 (555) 438-2910",
+                                    "Shipper / Consignee | Cargo: ${shipment.cargoType}"
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .testTag("chat_shipper_bid_${shipment.id}"),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Icon(Icons.Filled.Chat, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Chat Direct", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             } else {
                 if (!showBidInput) {
